@@ -11,8 +11,15 @@ class SearchTimeout(Exception):
 
 
 def custom_score(game, player):
-    if game.is_loser(player): return float("-inf")
-    if game.is_winner(player): return float("inf")
+    """
+    This scoring function is adds a distance bias on top of the
+    improved_score function. This will help us pick moves that
+    would have the biggest difference in legal moves while
+    favoring those that keep distance away from opponent.
+    """
+    score = game.utility(player)
+    if score != 0:
+        return score
 
     own_moves = len(game.get_legal_moves(player))
     opp_moves = len(game.get_legal_moves(game.get_opponent(player)))
@@ -22,13 +29,19 @@ def custom_score(game, player):
     opponent_pos = game.get_player_location(game.get_opponent(player)) or (0, 0)
     distance = ((player_pos[0] - opponent_pos[0]) ** 2 + (player_pos[1] - opponent_pos[1]) ** 2) ** (1/2.0)
     d_max = (game.height ** 2 + game.width ** 2) ** (1/2.)
-    distance_bias = (d_max - distance) / d_max
+    distance_bias = distance / 2
 
     return diff_moves + distance_bias
 
 def custom_score_2(game, player):
-    if game.is_loser(player): return float("-inf")
-    if game.is_winner(player): return float("inf")
+    """
+    This scoring function is adds a center bias on top of the
+    improved_score function. This will help us pick moves that
+    are closer to the center.
+    """
+    score = game.utility(player)
+    if score != 0:
+        return score
 
     own_moves = len(game.get_legal_moves(player))
     opp_moves = len(game.get_legal_moves(game.get_opponent(player)))
@@ -36,14 +49,20 @@ def custom_score_2(game, player):
 
     h, w = game.height / 2., game.width / 2.
     y, x = game.get_player_location(player)
-    center_bias = h - 1 <= y <= h + 1 and w - 1 <= x <= w + 1
+    is_center = h - 1 <= y <= h + 1 and w - 1 <= x <= w + 1
+    center_bias = 1.5 if is_center else 1
 
-    return diff_moves + center_bias
+    return diff_moves * center_bias
 
 
 def custom_score_3(game, player):
-    if game.is_loser(player): return float("-inf")
-    if game.is_winner(player): return float("inf")
+    """
+    This scoring function calculates the difference between self and
+    oppenent and try to maximize the distance.
+    """
+    score = game.utility(player)
+    if score != 0:
+        return score
 
     player_pos = game.get_player_location(player) or (0, 0)
     opponent_pos = game.get_player_location(game.get_opponent(player)) or (0, 0)
@@ -88,11 +107,9 @@ class MinimaxPlayer(IsolationPlayer):
         # score and returns it.
         if self.time_left() < self.TIMER_THRESHOLD:
             raise SearchTimeout()
-        if depth == 0:
-            return self.score(game, self)
         legal_moves = game.get_legal_moves()
-        if not legal_moves:
-            return game.utility(self)
+        if depth == 0 or not legal_moves:
+            return self.score(game, self)
         return max([self.min_value(game.forecast_move(move), depth - 1) for move in legal_moves])
 
     def min_value(self, game, depth):
@@ -101,11 +118,9 @@ class MinimaxPlayer(IsolationPlayer):
         # implements the details of the minmizing layer.
         if self.time_left() < self.TIMER_THRESHOLD:
             raise SearchTimeout()
-        if depth == 0:
-            return self.score(game, self)
         legal_moves = game.get_legal_moves()
-        if not legal_moves:
-            return game.utility(self)
+        if depth == 0 or not legal_moves:
+            return self.score(game, self)
         return min([self.max_value(game.forecast_move(move), depth - 1) for move in legal_moves])
 
 
@@ -139,10 +154,18 @@ class AlphaBetaPlayer(IsolationPlayer):
         self.time_left = time_left
 
         best_move = (-1, -1)
+        freq_hash = {}
+        highest_freq = 1
 
         try:
             while True:
-                best_move = self.alphabeta(game, self.search_depth)
+                move = self.alphabeta(game, self.search_depth)
+                if move != (-1, -1):
+                    if move not in freq_hash:
+                        freq_hash[move] = 0
+                    freq_hash[move] += 1
+                    if freq_hash[move] >= highest_freq:
+                        best_move, highest_freq = move, freq_hash[move]
                 self.search_depth += 1
         except SearchTimeout:
             pass
@@ -164,14 +187,14 @@ class AlphaBetaPlayer(IsolationPlayer):
         # it will never pick a score that is higher than beta.
 
         if self.time_left() < self.TIMER_THRESHOLD: raise SearchTimeout()
-        if depth == 0: return self.score(game, self)
         legal_moves = game.get_legal_moves()
-        if not legal_moves: return game.utility(self)
+        if depth == 0 or not legal_moves:
+            return self.score(game, self)
         for m in legal_moves:
             if alpha >= beta: break
-
             local_alpha = self.min_value(game.forecast_move(m), depth - 1, alpha, beta)
             if local_alpha > alpha: alpha = local_alpha
+            if self.time_left() < self.TIMER_THRESHOLD * 3: return alpha
 
         return alpha
 
@@ -184,14 +207,14 @@ class AlphaBetaPlayer(IsolationPlayer):
         # above will not consider this branch if it sees a local_alpha
         # less than or equal to the alpha it already has.
         if self.time_left() < self.TIMER_THRESHOLD: raise SearchTimeout()
-        if depth == 0: return self.score(game, self)
         legal_moves = game.get_legal_moves()
-        if not legal_moves: return game.utility(self)
+        if depth == 0 or not legal_moves:
+            return self.score(game, self)
         for m in legal_moves:
             if beta <= alpha: break
-
             local_beta = self.max_value(game.forecast_move(m), depth - 1, alpha, beta)
             if local_beta < beta: beta = local_beta
+            if self.time_left() < self.TIMER_THRESHOLD * 3: return beta
 
         return beta
 
@@ -209,5 +232,6 @@ class AlphaBetaPlayer(IsolationPlayer):
         for m in legal_moves:
             local_alpha = self.min_value(game.forecast_move(m), depth - 1, alpha, beta)
             if local_alpha > alpha: alpha, best_move = local_alpha, m
+            if self.time_left() < self.TIMER_THRESHOLD * 3: return best_move
 
         return best_move
